@@ -1,0 +1,5 @@
+{
+  "name": "Culina AI",
+  "description": "Modern AI-powered culinary assistant for personalized recipe discovery, meal planning, and smart shopping.",
+  "requestFramePermissions": ["camera"]
+}

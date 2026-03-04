@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-[#0f172a] text-[#f8fafc] font-sans;
+    padding-bottom: 80px;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-slate-800/70 backdrop-blur-xl border border-white/10;
+  }
+
+  .input-field {
+    @apply bg-[#1e293b] border-2 border-[#334155] transition-all duration-300 text-white focus:border-amber-500 focus:outline-none focus:ring-4 focus:ring-amber-500/20;
+  }
+
+  .btn-primary {
+    @apply bg-gradient-to-br from-amber-400 to-orange-600 shadow-lg shadow-amber-600/30 active:scale-95 transition-transform font-bold text-slate-900;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.popup-anim {
+  animation: slideUp 0.3s ease-out;
+}
