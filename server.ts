@@ -11,13 +11,15 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Konfiguracija varijabli okruženja
 const JWT_SECRET = process.env.JWT_SECRET || "culina-secret-key-123";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
+// Inicijalizacija SQLite baze
 const db = new Database("culina.db");
 
-// Initialize DB
+// Kreiranje tabela
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,57 +39,74 @@ db.exec(`
   )
 `);
 
-// Migration: Add postcode column if it doesn't exist (for existing databases)
+// Migracija: Dodavanje postcode kolone ako ne postoji
 try {
   db.exec("ALTER TABLE users ADD COLUMN postcode TEXT");
 } catch (e) {
-  // Column already exists or other error
+  // Kolona već postoji
 }
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  
+  // BITNO ZA RENDER: Koristimo port koji nam sistem dodijeli ili 3000 lokalno
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
   app.use(cookieParser());
 
-  // --- Auth Middleware ---
+  // --- Middleware za autentifikaciju ---
   const authenticate = (req: any, res: any, next: any) => {
     const token = req.cookies.token;
-    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    if (!token) return res.status(401).json({ error: "Niste prijavljeni" });
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as { id: number };
       req.userId = decoded.id;
       next();
     } catch (e) {
-      res.status(401).json({ error: "Invalid token" });
+      res.status(401).json({ error: "Nevalidan token" });
     }
   };
 
-  // --- API Routes ---
+  // --- API Rute ---
 
   app.post("/api/auth/register", async (req, res) => {
     const { email, password, firstName, lastName, address, postcode, phone } = req.body;
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
-      const result = db.prepare("INSERT INTO users (email, password, firstName, lastName, address, postcode, phone) VALUES (?, ?, ?, ?, ?, ?, ?)").run(email, hashedPassword, firstName, lastName, address, postcode, phone);
+      const result = db.prepare(
+        "INSERT INTO users (email, password, firstName, lastName, address, postcode, phone) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).run(email, hashedPassword, firstName, lastName, address, postcode, phone);
+      
       const token = jwt.sign({ id: result.lastInsertRowid }, JWT_SECRET);
-      res.cookie("token", token, { httpOnly: true, secure: true, sameSite: "none" });
+      res.cookie("token", token, { 
+        httpOnly: true, 
+        secure: true, 
+        sameSite: "none",
+        maxAge: 24 * 60 * 60 * 1000 // 1 dan
+      });
       res.json({ id: result.lastInsertRowid, email, firstName, lastName });
     } catch (e) {
-      res.status(400).json({ error: "Email already exists" });
+      res.status(400).json({ error: "Email već postoji" });
     }
   });
 
   app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
     const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+    
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ error: "Pogrešan email ili lozinka" });
     }
+    
     const token = jwt.sign({ id: user.id }, JWT_SECRET);
-    res.cookie("token", token, { httpOnly: true, secure: true, sameSite: "none" });
-    res.json({ id: user.id, email });
+    res.cookie("token", token, { 
+      httpOnly: true, 
+      secure: true, 
+      sameSite: "none",
+      maxAge: 24 * 60 * 60 * 1000 
+    });
+    res.json({ id: user.id, email, firstName: user.firstName });
   });
 
   app.post("/api/auth/logout", (req, res) => {
@@ -107,50 +126,8 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // --- Stripe Payment ---
-  app.post("/api/create-checkout-session", authenticate, async (req: any, res) => {
-    if (!stripe) return res.status(500).json({ error: "Stripe not configured" });
-    const { plan } = req.body;
-    const prices: any = {
-      plus: "price_plus_id", // Replace with real Stripe Price IDs
-      premium: "price_premium_id"
-    };
+  // --- Stripe i Frontend Handling ---
 
-    try {
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [{ price: prices[plan], quantity: 1 }],
-        mode: "subscription",
-        success_url: `${req.headers.origin}/profile?success=true`,
-        cancel_url: `${req.headers.origin}/profile?canceled=true`,
-        client_reference_id: req.userId.toString(),
-        metadata: { plan }
-      });
-      res.json({ url: session.url });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // --- Stripe Webhook ---
-  // In a real app, you'd use stripe.webhooks.constructEvent
-  app.post("/api/webhook", express.raw({ type: 'application/json' }), (req, res) => {
-    const sig = req.headers['stripe-signature'];
-    // This is a simplified placeholder. Real implementation requires the webhook secret.
-    const event = req.body; 
-
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const userId = session.client_reference_id;
-      const plan = session.metadata.plan;
-      
-      db.prepare("UPDATE users SET subscription = ? WHERE id = ?").run(plan, userId);
-    }
-
-    res.json({ received: true });
-  });
-
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -158,14 +135,17 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, "dist")));
+    // Služenje statičkih fajlova u produkciji (Render)
+    const distPath = path.resolve(__dirname, "dist");
+    app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
+      res.sendFile(path.resolve(distPath, "index.html"));
     });
   }
 
+  // Slušanje na 0.0.0.0 je obavezno za Render
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server pokrenut na portu ${PORT}`);
   });
 }
 
