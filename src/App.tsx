@@ -176,7 +176,8 @@ export default function App() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showCategoryBrowser, setShowCategoryBrowser] = useState(false);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  const [showLegalModal, setShowLegalModal] = useState<string | null>(null);
+  const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
+  const [legalType, setLegalType] = useState<'terms' | 'privacy' | 'security' | 'confidentiality'>('terms');
   const [showPaymentModal, setShowPaymentModal] = useState<{ plan: string } | null>(null);
 
   // Form states
